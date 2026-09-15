@@ -1,0 +1,32 @@
+--- a/fifo.c
++++ b/fifo.c
+@@ -2,6 +2,7 @@
+ #ifdef HAVE_STDLIB_H
+ #include <stdlib.h>
+ #endif
++#include <stdint.h>
+ #include "libbb_udpcast.h"
+ #include "fifo.h"
+ 
+@@ -9,7 +10,7 @@ void udpc_initFifo(struct fifo *fifo, unsigned int blockSize)
+ {
+     fifo->dataBufSize = blockSize * 4096;
+     fifo->dataBuffer = xmalloc(fifo->dataBufSize+4096);
+-    fifo->dataBuffer += 4096 - (((unsigned long)fifo->dataBuffer) % 4096);
++    fifo->dataBuffer += 4096 - (((uintptr_t)fifo->dataBuffer) % 4096);
+ 
+     /* Free memory queue is initially full */
+     fifo->freeMemQueue = pc_makeProduconsum(fifo->dataBufSize, "free mem");
+--- a/log.c
++++ b/log.c
+@@ -37,7 +37,9 @@ static int vlogprintf(FILE *logfile, const char *fmt, va_list ap) {
+ 	struct timeval tv;
+ 	int r;
+ 	if(newlineSeen) {
++        time_t seconds;
+ 	    gettimeofday(&tv, NULL);
+-	    strftime(buf, sizeof(buf), "%H:%M:%S", localtime(&tv.tv_sec));
++        seconds = (time_t)tv.tv_sec;
++	    strftime(buf, sizeof(buf), "%H:%M:%S", localtime(&seconds));
+ 	    fprintf(logfile, "%s.%06ld ", buf, (long) tv.tv_usec);
+ 	}

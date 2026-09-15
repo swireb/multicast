@@ -1,0 +1,88 @@
+name: Build UDPcast multicast binaries
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build Windows and Linux amd64 binaries
+        shell: pwsh
+        run: ./build.ps1 -Target all -DownloadToolchain
+      - name: Verify Windows PE amd64 binaries
+        shell: pwsh
+        run: |
+          ./tests/Test-UdpcastPackage.ps1 -Target WindowsAmd64 -RequireBinary
+          foreach ($file in @('output/windows-amd64/udp-sender.exe', 'output/windows-amd64/udp-receiver.exe')) {
+            $bytes = [IO.File]::ReadAllBytes($file); if ($bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw "不是 PE 文件：$file" }
+            $offset = [BitConverter]::ToInt32($bytes, 0x3c); if ([BitConverter]::ToUInt16($bytes, $offset + 4) -ne 0x8664) { throw "不是 x86-64 PE：$file" }
+          }
+      - name: Verify Linux ELF amd64 headers
+        shell: pwsh
+        run: |
+          foreach ($file in @('output/linux-amd64/udp-sender', 'output/linux-amd64/udp-receiver')) {
+            $bytes = [IO.File]::ReadAllBytes($file); if ($bytes[0] -ne 0x7f -or $bytes[1] -ne 0x45 -or $bytes[2] -ne 0x4c -or $bytes[3] -ne 0x46) { throw "不是 ELF 文件：$file" }
+            if ($bytes[4] -ne 2 -or [BitConverter]::ToUInt16($bytes, 18) -ne 62) { throw "不是 x86-64 ELF：$file" }
+          }
+      - name: Package release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Compress-Archive -Path output/windows-amd64/* -DestinationPath release/udpcast-windows-amd64.zip -Force
+          Compress-Archive -Path output/linux-amd64/* -DestinationPath release/udpcast-linux-amd64.zip -Force
+          Get-FileHash release/*.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLowerInvariant())  $($_.Path | Split-Path -Leaf)" } | Set-Content -Encoding ascii release/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: udpcast-binaries
+          path: output/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: udpcast-release-packages
+          path: release/
+
+  linux-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: udpcast-binaries
+          path: output
+      - name: Run Linux sender and receiver usage smoke tests
+        run: |
+          chmod +x output/linux-amd64/udp-sender output/linux-amd64/udp-receiver
+          set +e
+          output/linux-amd64/udp-sender --help >/tmp/sender.out 2>/tmp/sender.err; sender_status=$?
+          output/linux-amd64/udp-receiver --help >/tmp/receiver.out 2>/tmp/receiver.err; receiver_status=$?
+          set -e
+          test "$sender_status" -eq 1
+          test "$receiver_status" -eq 1
+          grep -q 'udp-sender' /tmp/sender.err
+          grep -q 'udp-receiver' /tmp/receiver.err
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux-smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: udpcast-release-packages
+          path: release
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --generate-notes \
+            release/udpcast-windows-amd64.zip release/udpcast-linux-amd64.zip release/SHA256SUMS
