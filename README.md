@@ -46,6 +46,8 @@ output/linux-amd64/udp-receiver
 
 Release 的 Linux 包用于提供原始二进制，Windows runner 制作 ZIP 不承诺保留 POSIX 执行位。RootPXE 在 Linux 首次将内嵌 sender 释放到 `data/multicast/udp-sender` 时会明确设为可执行；因此交给 RootPXE 嵌入前无需依赖压缩包的模式位。
 
+本仓库的 Windows/Linux amd64 目标仅描述 RootPXE 服务端 sender。PXEOS 的 receiver 与其 x86、x64、arm64 产物一同构建；不要将本仓库输出范围误写为 PXEOS 架构限制。RootPXE 的手动会话、存储和网络边界见主仓库 `docs/multicast.md`。
+
 ## 验证
 
 ```powershell
